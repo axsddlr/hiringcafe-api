@@ -150,8 +150,21 @@ curl -X POST http://127.0.0.1:8070/v1/search -H 'content-type: application/json'
 ```
 
 Known-good keys (confirmed in the wild): `searchQuery`, `jobTitleQuery`,
-`sortBy` (`date`), `dateFetchedPastNDays`, `seniorityLevel`. `jobTitleQuery`
-searches titles only; `searchQuery` searches the full posting.
+`sortBy` (`date`), `dateFetchedPastNDays`, `seniorityLevel`. `searchQuery`
+searches the full posting; `jobTitleQuery` searches the title — but **bare terms
+are OR-matched**, so `"network specialist"` as a plain value returned 9,212
+results including "Peer Specialist" and "Substance Use Specialist". Quote the
+phrase to get a title phrase match instead:
+
+```json
+{ "search_state": { "locations": [ … ], "jobTitleQuery": "\"network specialist\"" } }
+```
+
+Measured on the same 10469 radius: bare `network specialist` → 9,212 upstream
+matches; quoted → **6**, all of them actual Network Specialist titles. Use
+`searchQuery` for recall (it also matches body text like "network security", which
+is why an Info Sec role appears in a "network specialist" search) and a quoted
+`jobTitleQuery` for precision.
 
 ### Sponsored postings
 
