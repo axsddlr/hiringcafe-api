@@ -9,15 +9,14 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path $python)) {
-    throw "virtualenv missing. Run: uv venv; uv pip install -r requirements.txt"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    throw "uv not found. Install: https://docs.astral.sh/uv/getting-started/installation/"
 }
 
 if (-not (Test-Path (Join-Path $PSScriptRoot "data\us_zips.db"))) {
     Write-Host "building zip database..." -ForegroundColor Yellow
-    & $python scripts\build_zipdb.py
+    & uv run python scripts\build_zipdb.py
 }
 
 Write-Host "starting on http://${HostAddress}:${Port}  (docs at /docs)" -ForegroundColor Green
-& $python -m uvicorn app.main:app --host $HostAddress --port $Port --log-level info
+& uv run uvicorn app.main:app --host $HostAddress --port $Port --log-level info

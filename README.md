@@ -27,16 +27,16 @@ The examples below use `data analyst` in Boise, ID purely as a neutral sample.
 ## Quickstart
 
 ```bash
-python -m venv .venv && . .venv/Scripts/activate     # Windows
-# or: uv venv && uv pip install -r requirements.txt
-
-pip install -r requirements.txt
-
-python scripts/build_zipdb.py        # once: GeoNames US dump -> data/us_zips.db
-uvicorn app.main:app --port 8070
+uv sync                                   # creates .venv, installs deps + dev group
+uv run python scripts/build_zipdb.py      # once: GeoNames US dump -> data/us_zips.db
+uv run uvicorn app.main:app --port 8070
 
 curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&radius=25"
 ```
+
+Requires [uv](https://docs.astral.sh/uv/). `uv.lock` is committed, so `uv sync`
+installs the exact resolved versions. If you need a pip-style file for some other
+tool: `uv export --format requirements-txt > requirements.txt`.
 
 Docs: `http://127.0.0.1:8070/docs`
 
@@ -207,7 +207,7 @@ returned as `200` with `meta.upstream_error` populated.
 60 offline tests, no network:
 
 ```bash
-python -m pytest        # 60 passed
+uv run pytest        # 60 passed
 ```
 
 The suite is not smoke tests. Notable coverage:
@@ -234,7 +234,7 @@ real site, re-derives every field from the raw fixture with independent logic so
 a bug in `normalize.py` cannot mask itself):
 
 ```bash
-python scripts/verify_live.py verification/live_search.json
+uv run python scripts/verify_live.py verification/live_search.json
 # ALL CHECKS PASSED: 38 jobs reproduced field-for-field from upstream
 ```
 

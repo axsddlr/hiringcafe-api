@@ -3,10 +3,10 @@
 Real responses from the running service, kept as evidence. Regenerate with:
 
 ```bash
-uvicorn app.main:app --port 8070
+uv run uvicorn app.main:app --port 8070
 curl -s "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&radius=25" \
   -o verification/live_search.json
-python scripts/verify_live.py verification/live_search.json
+uv run python scripts/verify_live.py verification/live_search.json
 ```
 
 The sample is deliberately generic — Boise, ID for the main capture and Austin, TX

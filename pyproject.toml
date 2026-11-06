@@ -10,7 +10,8 @@ dependencies = [
     "curl_cffi>=0.7",
 ]
 
-[project.optional-dependencies]
+# PEP 735 dependency group: installed by a plain `uv sync`.
+[dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
