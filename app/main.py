@@ -61,6 +61,9 @@ class RawSearchRequest(BaseModel):
     )
     page: int = Field(0, ge=0, description="Zero-based page index (unverified upstream key)")
     include_raw: bool = Field(False, description="Include the untouched upstream payload")
+    include_sponsored: bool = Field(
+        False, description="Include sponsored/promoted placements (excluded by default)"
+    )
 
 
 def create_app() -> FastAPI:
@@ -145,6 +148,10 @@ def create_app() -> FastAPI:
         ignore_radius: bool = Query(False, description="Ignore the radius entirely (remote / nationwide search)"),
         page: int = Query(0, ge=0, description="Zero-based page index (unverified upstream key)"),
         include_raw: bool = Query(False, description="Include the untouched upstream payload under `raw`"),
+        include_sponsored: bool = Query(
+            False,
+            description="Include sponsored/promoted placements. Excluded by default; see README.",
+        ),
         api_client: HiringCafeClient = Depends(get_client),
     ) -> dict:
         found = resolve_us_zip(
@@ -169,6 +176,7 @@ def create_app() -> FastAPI:
             include_raw=include_raw,
             raw_payload=result.raw_payload,
             cache_hit=result.cache_hit,
+            include_sponsored=include_sponsored,
         )
 
     @app.post(
@@ -208,6 +216,7 @@ def create_app() -> FastAPI:
             include_raw=body.include_raw,
             raw_payload=result.raw_payload,
             cache_hit=result.cache_hit,
+            include_sponsored=body.include_sponsored,
         )
 
     return app

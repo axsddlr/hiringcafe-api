@@ -111,6 +111,7 @@ alternatives — a trailing `chown -R /app` and a plain `uv sync` — cost 411 M
 | `ignore_radius` | bool | `false` | nationwide / remote search |
 | `page` | int | `0` | verified: sibling query param, see below |
 | `include_raw` | bool | `false` | attach untouched upstream payload |
+| `include_sponsored` | bool | `false` | include paid/promoted placements (excluded by default) |
 
 **Pagination is verified, not guessed.** `page` must be a *sibling* query
 parameter (`?searchState=…&page=1`), **not** a key inside `searchState`.
@@ -148,6 +149,32 @@ Known-good keys (confirmed in the wild): `searchQuery`, `jobTitleQuery`,
 `sortBy` (`date`), `dateFetchedPastNDays`, `seniorityLevel`. `jobTitleQuery`
 searches titles only; `searchQuery` searches the full posting.
 
+### Sponsored postings
+
+Sponsored/promoted placements are **excluded by default**; pass
+`include_sponsored=true` (or `include_sponsored: true` in the POST body) to get
+them back, in which case each job also carries `"sponsored": true`.
+
+Two honest caveats, because this is a guard rather than a live filter:
+
+- **Upstream currently exposes no placement flag at all.** `scripts/probe_sponsored.py`
+  scans both the SSR HTML and the JSON of a 79,452-match nationwide search: zero
+  `Sponsored` badges, zero `is_sponsored` / `sponsored` / `is_promoted` /
+  `promoted` / `is_featured` keys. The only "sponsor" strings in the payload are
+  the `visa_sponsorship` requirement and prose in job descriptions. So today the
+  filter removes nothing — the captured 38-job search is returned intact.
+- Because there is no marker, the filter keys on the field names such a flag would
+  plausibly use (`SPONSORED_MARKERS` in `app/normalize.py`), checked at both the
+  hit level and inside `job_information`. If HiringCafe starts emitting a flag
+  under a different name, add it there. `meta.excluded_sponsored` tells you how
+  many were dropped, and `meta.returned_count` what actually came back —
+  `meta.total_count` stays upstream's own number and is never rewritten to hide
+  the difference.
+
+If you actually meant *visa* sponsorship, that is a different filter: jobs carry
+`benefits.visa_sponsorship` and `requirements_summary` mentions, and excluding on
+that is a one-line change rather than a guess about placement markers.
+
 ### Example
 
 ```bash
@@ -167,6 +194,7 @@ curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&rad
       "options": { "radius": 25, "radius_unit": "miles", "ignore_radius": false }
     },
     "page": 0, "page_size": 40, "total_count": 38, "company_count": 21,
+    "returned_count": 38, "excluded_sponsored": 0,
     "is_last_page": true, "signed_in": false, "es_latency_ms": 171,
     "upstream_error": null,
     "build_id": "vDB2eNJmER-1oMfTvMzRp", "upstream_status": 200,
@@ -245,10 +273,10 @@ returned as `200` with `meta.upstream_error` populated.
 
 ## Verification
 
-60 offline tests, no network:
+72 offline tests, no network:
 
 ```bash
-uv run pytest        # 60 passed
+uv run pytest        # 72 passed
 ```
 
 The suite is not smoke tests. Notable coverage:
@@ -372,8 +400,9 @@ scripts/
   capture_fixture.py   capture a new upstream fixture (zip + query)
   redact_fixture.py    strip user-identifying arrays from a fixture
   probe_pagination.py  prove how `page` is passed
+  probe_sponsored.py   scan upstream HTML+JSON for placement markers
   verify_live.py       live output vs ground truth
-tests/            60 offline tests + captured upstream fixture
+tests/            72 offline tests + captured upstream fixture
 verification/     captured live responses used as evidence
 Dockerfile        uv-based, non-root, healthchecked image
 docker-compose.yml

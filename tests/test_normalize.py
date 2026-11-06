@@ -14,7 +14,8 @@ from app.normalize import normalize_job, normalize_page
 FETCHED_AT = "2026-11-06T07:10:00+00:00"
 
 
-def build(page_props, upstream_search_state, *, include_raw=False, raw_payload=None):
+def build(page_props, upstream_search_state, *, include_raw=False, raw_payload=None,
+          include_sponsored=False):
     return normalize_page(
         page_props,
         query="data analyst",
@@ -24,7 +25,18 @@ def build(page_props, upstream_search_state, *, include_raw=False, raw_payload=N
         fetched_at=FETCHED_AT,
         include_raw=include_raw,
         raw_payload=raw_payload,
+        include_sponsored=include_sponsored,
     )
+
+
+def with_sponsored(page_props, *, marker="is_sponsored", where="job_information"):
+    """Deep-copy the payload and flag the first hit as a paid placement."""
+    import copy
+
+    page_props = copy.deepcopy(page_props)
+    hit = page_props["ssrHits"][0]
+    (hit["job_information"] if where == "job_information" else hit)[marker] = True
+    return page_props
 
 
 def find(jobs, predicate):
@@ -206,6 +218,56 @@ def test_upstream_error_surfaces(page_props, upstream_search_state):
 def test_no_html_entities_survive_anywhere(page_props, upstream_search_state):
     out = build(page_props, upstream_search_state)
     assert "&amp;" not in json.dumps(out)
+
+
+def test_captured_search_contains_no_sponsored_posts(page_props, upstream_search_state):
+    """Measured fact: the real payload carries no placement markers at all."""
+    meta = build(page_props, upstream_search_state)["meta"]
+    assert meta["excluded_sponsored"] == 0
+    assert meta["returned_count"] == 38
+    assert meta["total_count"] == 38
+
+
+def test_sponsored_hits_are_excluded_by_default(page_props, upstream_search_state):
+    out = build(with_sponsored(page_props), upstream_search_state)
+
+    assert len(out["jobs"]) == 37
+    assert out["meta"]["excluded_sponsored"] == 1
+    assert out["meta"]["returned_count"] == 37
+    # upstream's total is reported as-is, not rewritten to match our filter
+    assert out["meta"]["total_count"] == 38
+    assert all(job["sponsored"] is False for job in out["jobs"])
+
+
+def test_sponsored_hits_can_be_included_explicitly(page_props, upstream_search_state):
+    out = build(with_sponsored(page_props), upstream_search_state, include_sponsored=True)
+
+    assert len(out["jobs"]) == 38
+    assert out["meta"]["excluded_sponsored"] == 0
+    assert out["jobs"][0]["sponsored"] is True
+
+
+@pytest.mark.parametrize(
+    "marker,where",
+    [
+        ("is_sponsored", "job_information"),
+        ("sponsored", "job_information"),
+        ("is_promoted", "top"),
+        ("promoted", "top"),
+        ("is_featured", "top"),
+    ],
+)
+def test_every_known_marker_triggers_exclusion(page_props, upstream_search_state, marker, where):
+    out = build(with_sponsored(page_props, marker=marker, where=where), upstream_search_state)
+    assert out["meta"]["excluded_sponsored"] == 1
+
+
+def test_falsey_marker_does_not_exclude(page_props, upstream_search_state):
+    page_props = with_sponsored(page_props, marker="is_sponsored")
+    page_props["ssrHits"][0]["job_information"]["is_sponsored"] = False
+    out = build(page_props, upstream_search_state)
+    assert out["meta"]["excluded_sponsored"] == 0
+    assert len(out["jobs"]) == 38
 
 
 def test_html_entities_are_unescaped_in_text_fields():

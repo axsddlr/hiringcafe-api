@@ -174,3 +174,53 @@ def test_post_rejects_oversized_search_state(api):
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_search_state"
     assert r.json()["error"]["details"]["limit"] > 0
+
+
+def _sponsored_payload(page_props):
+    import copy
+
+    page_props = copy.deepcopy(page_props)
+    page_props["ssrHits"][0]["job_information"]["is_sponsored"] = True
+    return {"pageProps": page_props}
+
+
+def test_sponsored_excluded_by_default_over_http(api, page_props):
+    client, fake = api
+    fake.payload = _sponsored_payload(page_props)
+
+    body = client.get(
+        "/v1/search", params={"query": SAMPLE_QUERY, "postal_code": SAMPLE_ZIP}
+    ).json()
+
+    assert body["meta"]["excluded_sponsored"] == 1
+    assert body["meta"]["returned_count"] == 37
+    assert len(body["jobs"]) == 37
+
+
+def test_sponsored_included_on_request(api, page_props):
+    client, fake = api
+    fake.payload = _sponsored_payload(page_props)
+
+    body = client.get(
+        "/v1/search",
+        params={"query": SAMPLE_QUERY, "postal_code": SAMPLE_ZIP, "include_sponsored": "true"},
+    ).json()
+
+    assert body["meta"]["excluded_sponsored"] == 0
+    assert len(body["jobs"]) == 38
+    assert body["jobs"][0]["sponsored"] is True
+
+
+def test_post_can_include_sponsored(api, page_props, upstream_search_state):
+    client, fake = api
+    fake.payload = _sponsored_payload(page_props)
+
+    default = client.post("/v1/search", json={"search_state": upstream_search_state}).json()
+    assert default["meta"]["excluded_sponsored"] == 1
+
+    opted_in = client.post(
+        "/v1/search",
+        json={"search_state": upstream_search_state, "include_sponsored": True},
+    ).json()
+    assert opted_in["meta"]["excluded_sponsored"] == 0
+    assert len(opted_in["jobs"]) == 38

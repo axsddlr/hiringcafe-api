@@ -83,6 +83,7 @@ class Job(TypedDict):
     posted_at: str | None
     posted_at_epoch_ms: int | None
     is_expired: bool
+    sponsored: bool
     requirements_summary: str | None
     technical_tools: list[str]
     certifications: list[str]
@@ -98,6 +99,8 @@ class Meta(TypedDict):
     page: int
     page_size: int | None
     total_count: int
+    returned_count: int
+    excluded_sponsored: int
     company_count: int
     is_last_page: bool
     signed_in: bool

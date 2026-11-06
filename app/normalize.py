@@ -78,6 +78,31 @@ def _list(value: Any) -> list:
     return [_text(item) for item in value]
 
 
+# Fields that would mark a paid/promoted placement. As of every captured payload
+# no such field exists anywhere in the response -- see scripts/probe_sponsored.py,
+# which scans both the SSR HTML and the JSON for sponsor/promote/featured
+# vocabulary. In practice nothing is filtered today; these markers make the
+# exclusion explicit and keep it working if upstream starts emitting a flag.
+SPONSORED_MARKERS = (
+    "is_sponsored",
+    "sponsored",
+    "is_promoted",
+    "promoted",
+    "is_featured",
+)
+
+
+def is_sponsored(hit: dict) -> bool:
+    """True when a hit carries a sponsorship/promotion marker on either level."""
+    for container in (hit, hit.get("job_information") or {}):
+        if not isinstance(container, dict):
+            continue
+        for marker in SPONSORED_MARKERS:
+            if container.get(marker):
+                return True
+    return False
+
+
 def _posted_date(raw: Any) -> str | None:
     if isinstance(raw, str) and len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
         return raw[:10]
@@ -146,6 +171,7 @@ def normalize_job(hit: dict) -> dict:
         "posted_at": data.get("estimated_publish_date"),
         "posted_at_epoch_ms": _int(data.get("estimated_publish_date_millis")),
         "is_expired": bool(hit.get("is_expired")),
+        "sponsored": is_sponsored(hit),
         "requirements_summary": _text(data.get("requirements_summary")),
         "technical_tools": _list(data.get("technical_tools")),
         "certifications": _list(data.get("licenses_or_certifications")),
@@ -171,9 +197,16 @@ def normalize_page(
     include_raw: bool = False,
     raw_payload: dict | None = None,
     cache_hit: bool = False,
+    include_sponsored: bool = False,
 ) -> dict:
     hits = page_props.get("ssrHits") or []
     timings = page_props.get("ssrTimings") or {}
+
+    if include_sponsored:
+        kept, excluded = hits, 0
+    else:
+        kept = [hit for hit in hits if not is_sponsored(hit)]
+        excluded = len(hits) - len(kept)
 
     response = {
         "meta": {
@@ -181,7 +214,11 @@ def normalize_page(
             "location": location,
             "page": page_props.get("ssrPage", 0),
             "page_size": page_props.get("ssrPageSize"),
+            # Upstream's own total; it does not know about our exclusions.
             "total_count": page_props.get("ssrTotalCount", len(hits)),
+            # What this response actually carries.
+            "returned_count": len(kept),
+            "excluded_sponsored": excluded,
             "company_count": page_props.get("ssrCompanyCount", 0),
             "is_last_page": bool(page_props.get("ssrIsLastPage")),
             "signed_in": bool(page_props.get("ssrSignedIn")),
@@ -192,7 +229,7 @@ def normalize_page(
             "fetched_at": fetched_at,
             "cache_hit": cache_hit,
         },
-        "jobs": [normalize_job(hit) for hit in hits],
+        "jobs": [normalize_job(hit) for hit in kept],
     }
 
     if include_raw:
