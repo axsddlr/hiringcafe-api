@@ -9,6 +9,7 @@ never takes the response down.
 from __future__ import annotations
 
 import html as _html
+import math
 from typing import Any
 
 DEGREE_KEYS = (
@@ -109,6 +110,44 @@ def _posted_date(raw: Any) -> str | None:
     return None
 
 
+def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in statute miles."""
+    radius = 3958.8
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(a))
+
+
+def workplace_locations(data: dict, geolocs: Any) -> list[dict]:
+    """Zip the parallel workplace lists into one entry per location.
+
+    A posting like "Washington or New York City" carries two entries; keeping only
+    the first is what makes a New York job look like a DC job.
+    """
+    cities = _list(data.get("workplace_cities"))
+    states = _list(data.get("workplace_states"))
+    counties = _list(data.get("workplace_counties"))
+    countries = _list(data.get("workplace_countries"))
+    geos = geolocs if isinstance(geolocs, list) else []
+
+    locations = []
+    for index in range(max(len(cities), len(states), len(countries), len(geos))):
+        geo = geos[index] if index < len(geos) and isinstance(geos[index], dict) else {}
+        locations.append(
+            {
+                "city": cities[index] if index < len(cities) else None,
+                "county": counties[index] if index < len(counties) else None,
+                "state": states[index] if index < len(states) else None,
+                "country": countries[index] if index < len(countries) else None,
+                "lat": _num(geo.get("lat")),
+                "lon": _num(geo.get("lon")),
+            }
+        )
+    return locations
+
+
 def normalize_salary(job_data: dict) -> dict:
     period = job_data.get("listed_compensation_frequency")
     min_field, max_field = PERIOD_FIELDS.get(period, (None, None))
@@ -138,10 +177,33 @@ def normalize_salary(job_data: dict) -> dict:
     }
 
 
-def normalize_job(hit: dict) -> dict:
+def normalize_job(
+    hit: dict,
+    *,
+    center: dict | None = None,
+    radius_miles: float | None = None,
+) -> dict:
     job_info = hit.get("job_information") or {}
     data = hit.get("v5_processed_job_data") or {}
     geoloc = _first(hit.get("_geoloc")) or {}
+    locations = workplace_locations(data, hit.get("_geoloc") or [])
+
+    center_lat = _num((center or {}).get("lat"))
+    center_lon = _num((center or {}).get("lon"))
+    nearest: float | None = None
+    if center_lat is not None and center_lon is not None:
+        for entry in locations:
+            if entry["lat"] is None or entry["lon"] is None:
+                continue
+            distance = haversine_miles(center_lat, center_lon, entry["lat"], entry["lon"])
+            entry["distance_miles"] = round(distance, 1)
+            if nearest is None or distance < nearest:
+                nearest = distance
+
+    if nearest is not None and radius_miles is not None:
+        within_radius: bool | None = nearest <= radius_miles
+    else:
+        within_radius = None
 
     return {
         "id": hit.get("id"),
@@ -162,6 +224,11 @@ def normalize_job(hit: dict) -> dict:
             "lat": _num(geoloc.get("lat")),
             "lon": _num(geoloc.get("lon")),
         },
+        # Every listed workplace, not just the first: "Washington or New York City"
+        # is a local job whose primary entry points at DC.
+        "locations": locations,
+        "distance_miles": round(nearest, 1) if nearest is not None else None,
+        "within_radius": within_radius,
         "workplace_type": data.get("workplace_type"),
         "seniority": data.get("seniority_level"),
         "job_category": data.get("job_category"),
@@ -199,6 +266,10 @@ def normalize_page(
     raw_payload: dict | None = None,
     cache_hit: bool = False,
     include_sponsored: bool = False,
+    center: dict | None = None,
+    radius: float | None = None,
+    radius_unit: str | None = None,
+    within_radius_only: bool = False,
 ) -> dict:
     hits = page_props.get("ssrHits") or []
     timings = page_props.get("ssrTimings") or {}
@@ -209,6 +280,24 @@ def normalize_page(
         kept = [hit for hit in hits if not is_sponsored(hit)]
         excluded = len(hits) - len(kept)
 
+    if radius is None:
+        radius_miles = None
+    elif (radius_unit or "miles") == "miles":
+        radius_miles = float(radius)
+    else:
+        radius_miles = float(radius) * 0.621371
+
+    jobs = [normalize_job(hit, center=center, radius_miles=radius_miles) for hit in kept]
+
+    out_of_radius = unknown_location = 0
+    if within_radius_only:
+        # A posting with no coordinates cannot be shown to be local, so it is not
+        # treated as local -- but it is counted separately from a known-far job.
+        local = [job for job in jobs if job["within_radius"] is True]
+        out_of_radius = sum(1 for job in jobs if job["within_radius"] is False)
+        unknown_location = sum(1 for job in jobs if job["within_radius"] is None)
+        jobs = local
+
     response = {
         "meta": {
             "query": query,
@@ -218,8 +307,12 @@ def normalize_page(
             # Upstream's own total; it does not know about our exclusions.
             "total_count": page_props.get("ssrTotalCount", len(hits)),
             # What this response actually carries.
-            "returned_count": len(kept),
+            "returned_count": len(jobs),
             "excluded_sponsored": excluded,
+            "excluded_out_of_radius": out_of_radius,
+            "excluded_unknown_location": unknown_location,
+            "search_center": center,
+            "radius_miles": radius_miles,
             "company_count": page_props.get("ssrCompanyCount", 0),
             "is_last_page": bool(page_props.get("ssrIsLastPage")),
             "signed_in": bool(page_props.get("ssrSignedIn")),
@@ -230,7 +323,7 @@ def normalize_page(
             "fetched_at": fetched_at,
             "cache_hit": cache_hit,
         },
-        "jobs": [normalize_job(hit) for hit in kept],
+        "jobs": jobs,
     }
 
     if include_raw:

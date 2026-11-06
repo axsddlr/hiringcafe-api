@@ -5,11 +5,12 @@ predicates over the job list, so the suite does not silently encode one sample's
 quirks (e.g. "there happens to be a Remote job at index 18").
 """
 
+import copy
 import json
 
 import pytest
 
-from app.normalize import normalize_job, normalize_page
+from app.normalize import haversine_miles, normalize_job, normalize_page
 
 FETCHED_AT = "2026-11-06T07:10:00+00:00"
 
@@ -230,6 +231,117 @@ def test_every_job_carries_a_category(page_props, upstream_search_state):
 def test_no_html_entities_survive_anywhere(page_props, upstream_search_state):
     out = build(page_props, upstream_search_state)
     assert "&amp;" not in json.dumps(out)
+
+
+BOISE_CENTER = {"lat": 43.6322, "lon": -116.2052}
+
+
+def test_haversine_is_sane():
+    # New York -> Los Angeles is ~2,450 statute miles.
+    assert 2400 < haversine_miles(40.7128, -74.0060, 34.0522, -118.2437) < 2500
+    # a point against itself is zero
+    assert haversine_miles(43.6322, -116.2052, 43.6322, -116.2052) == pytest.approx(0, abs=1e-9)
+
+
+def test_multi_location_job_keeps_every_workplace(page_props, upstream_search_state):
+    """'Boise or Edinburgh' must not collapse to whichever city upstream listed first."""
+    out = normalize_page(
+        page_props,
+        query="data analyst",
+        location=upstream_search_state["locations"][0],
+        build_id="TESTBUILDID",
+        upstream_status=200,
+        fetched_at=FETCHED_AT,
+        center=BOISE_CENTER,
+        radius=25,
+        radius_unit="miles",
+    )
+    multi = find(out["jobs"], lambda j: len(j["locations"]) > 1)
+    assert {loc["country"] for loc in multi["locations"]} >= {"US", "GB"}
+    # distance is measured to the *nearest* listed workplace, not the first
+    assert multi["distance_miles"] < 25
+    assert multi["within_radius"] is True
+
+
+def test_within_radius_filter_drops_far_postings(page_props, upstream_search_state):
+    """A New York posting whose first location is San Francisco is not a New York result."""
+    page_props = copy.deepcopy(page_props)
+    near, far = page_props["ssrHits"][0], page_props["ssrHits"][1]
+
+    near["v5_processed_job_data"].update(
+        workplace_cities=["Boise, Idaho, US"], workplace_states=["Idaho, US"],
+        workplace_countries=["US"], formatted_workplace_location="Boise, Idaho, United States",
+    )
+    near["_geoloc"] = [{"lat": 43.615, "lon": -116.2023}]
+
+    far["v5_processed_job_data"].update(
+        workplace_cities=["San Francisco, California, US"], workplace_states=["California, US"],
+        workplace_countries=["US"], formatted_workplace_location="San Francisco, California, United States",
+    )
+    far["_geoloc"] = [{"lat": 37.7749, "lon": -122.4194}]
+
+    page_props["ssrHits"] = [near, far]
+
+    kwargs = dict(
+        query="data analyst",
+        location=upstream_search_state["locations"][0],
+        build_id="TESTBUILDID",
+        upstream_status=200,
+        fetched_at=FETCHED_AT,
+        center=BOISE_CENTER,
+        radius=25,
+        radius_unit="miles",
+        within_radius_only=True,
+    )
+    out = normalize_page(page_props, **kwargs)
+
+    assert out["meta"]["returned_count"] == 1
+    assert out["meta"]["excluded_out_of_radius"] == 1
+    assert out["meta"]["radius_miles"] == 25.0
+    assert out["meta"]["search_center"] == BOISE_CENTER
+    assert out["jobs"][0]["title"] == page_props["ssrHits"][0]["job_information"]["title"]
+
+
+def test_km_radius_is_converted(page_props, upstream_search_state):
+    out = normalize_page(
+        page_props,
+        query="data analyst",
+        location=upstream_search_state["locations"][0],
+        build_id="TESTBUILDID",
+        upstream_status=200,
+        fetched_at=FETCHED_AT,
+        center=BOISE_CENTER,
+        radius=40,
+        radius_unit="km",
+    )
+    assert out["meta"]["radius_miles"] == pytest.approx(24.85, abs=0.01)
+
+
+def test_posting_without_coordinates_is_not_treated_as_local(upstream_search_state):
+    page_props = {
+        "ssrHits": [
+            {
+                "id": "no-coords",
+                "v5_processed_job_data": {"core_job_title": "IT Support", "workplace_cities": ["Remote"]},
+            }
+        ],
+        "ssrTotalCount": 1,
+        "ssrTimings": {},
+    }
+    out = normalize_page(
+        page_props,
+        query="it support",
+        location=upstream_search_state["locations"][0],
+        build_id="B",
+        upstream_status=200,
+        fetched_at=FETCHED_AT,
+        center=BOISE_CENTER,
+        radius=25,
+        radius_unit="miles",
+        within_radius_only=True,
+    )
+    assert out["meta"]["excluded_unknown_location"] == 1
+    assert out["jobs"] == []
 
 
 def test_captured_search_contains_no_sponsored_posts(page_props, upstream_search_state):

@@ -33,6 +33,16 @@ class JobLocation(TypedDict):
     lon: float | None
 
 
+class WorkplaceLocation(TypedDict, total=False):
+    city: str | None
+    county: str | None
+    state: str | None
+    country: str | None
+    lat: float | None
+    lon: float | None
+    distance_miles: float
+
+
 class Education(TypedDict):
     associates: str | None
     bachelors: str | None
@@ -74,6 +84,9 @@ class Job(TypedDict):
     company_industry: str | None
     apply_url: str | None
     location: JobLocation
+    locations: list[WorkplaceLocation]
+    distance_miles: float | None
+    within_radius: bool | None
     workplace_type: str | None
     seniority: str | None
     job_category: str | None
@@ -102,6 +115,10 @@ class Meta(TypedDict):
     total_count: int
     returned_count: int
     excluded_sponsored: int
+    excluded_out_of_radius: int
+    excluded_unknown_location: int
+    search_center: dict | None
+    radius_miles: float | None
     company_count: int
     is_last_page: bool
     signed_in: bool

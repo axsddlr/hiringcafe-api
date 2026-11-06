@@ -115,6 +115,7 @@ alternatives — a trailing `chown -R /app` and a plain `uv sync` — cost 411 M
 | `page` | int | `0` | verified: sibling query param, see below |
 | `include_raw` | bool | `false` | attach untouched upstream payload |
 | `include_sponsored` | bool | `false` | include paid/promoted placements (excluded by default) |
+| `within_radius` | bool | `false` | keep only postings with a listed workplace inside `radius` |
 
 **Pagination is verified, not guessed.** `page` must be a *sibling* query
 parameter (`?searchState=…&page=1`), **not** a key inside `searchState`.
@@ -198,6 +199,8 @@ curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&rad
     },
     "page": 0, "page_size": 40, "total_count": 38, "company_count": 21,
     "returned_count": 38, "excluded_sponsored": 0,
+    "excluded_out_of_radius": 0, "excluded_unknown_location": 0,
+    "search_center": { "lat": 43.6322, "lon": -116.2052 }, "radius_miles": 25.0,
     "is_last_page": true, "signed_in": false, "es_latency_ms": 171,
     "upstream_error": null,
     "build_id": "vDB2eNJmER-1oMfTvMzRp", "upstream_status": 200,
@@ -217,6 +220,12 @@ curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&rad
         "state": "Idaho, US", "country": "US",
         "lat": 43.615, "lon": -116.2023
       },
+      "locations": [
+        { "city": "Boise, Idaho, US", "state": "Idaho, US", "country": "US",
+          "lat": 43.615, "lon": -116.2023, "distance_miles": 1.5 }
+      ],
+      "distance_miles": 1.5,
+      "within_radius": true,
       "workplace_type": "Onsite",
       "seniority": "Entry Level",
       "job_category": "Data and Analytics",
@@ -277,11 +286,11 @@ returned as `200` with `meta.upstream_error` populated.
 
 ## Verification
 
-81 offline tests, no network, **96% statement coverage** (excluding the
+90 offline tests, no network, **96% statement coverage** (excluding the
 TypedDict-only `models.py`):
 
 ```bash
-uv run pytest --cov=app --cov-report=term-missing   # 81 passed, 96%
+uv run pytest --cov=app --cov-report=term-missing   # 90 passed, 96%
 uv run ruff check app scripts tests                 # clean
 ```
 
@@ -339,6 +348,17 @@ origin is never hammered.
 **One fetch primitive.** Both routes funnel into `HiringCafeClient.fetch(search_state)`.
 The GET path only differs in how it *builds* `search_state`; the POST path lets a
 caller supply it verbatim.
+
+**Multi-city postings decide locality by their nearest workplace, not their first.**
+Upstream emits every workplace a posting covers ("Washington or New York City" is
+two entries) and this API exposes all of them in `locations[]`, each with its own
+`distance_miles` from `meta.search_center`. `job.distance_miles` is the distance to
+the **nearest** of them, and `within_radius` is the boolean a client should filter
+on — `location` (singular) is kept only as the first entry, for compatibility.
+Measured on a 10469 search: 44 of 356 postings had a first location more than 50
+miles away while genuinely listing New York City, so filtering on `location`
+alone silently discards real local jobs. If you want strictly local postings
+regardless of multi-city listings, filter on `locations[0].distance_miles` instead.
 
 **Caching.** Two layers: `buildId` (TTL 6 h, invalidated on 404) and whole
 responses (TTL 300 s, LRU 256). A repeated search goes from ~1.5 s to ~6 ms.
@@ -416,7 +436,7 @@ scripts/
   probe_pagination.py  prove how `page` is passed
   probe_sponsored.py   scan upstream HTML+JSON for placement markers
   verify_live.py       live output vs ground truth
-tests/            81 offline tests + captured upstream fixture
+tests/            90 offline tests + captured upstream fixture
 verification/     captured live responses used as evidence
 Dockerfile        uv-based, non-root, healthchecked image
 docker-compose.yml

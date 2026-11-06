@@ -1,5 +1,7 @@
 """HTTP contract tests. Upstream is stubbed so the suite is fully offline."""
 
+import copy
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -243,3 +245,47 @@ def test_post_can_include_sponsored(api, page_props, upstream_search_state):
     ).json()
     assert opted_in["meta"]["excluded_sponsored"] == 0
     assert len(opted_in["jobs"]) == 38
+
+
+def test_search_exposes_distance_and_radius_metadata(api):
+    client, _ = api
+    body = client.get(
+        "/v1/search", params={"query": SAMPLE_QUERY, "postal_code": SAMPLE_ZIP, "radius": 25}
+    ).json()
+
+    assert body["meta"]["radius_miles"] == 25.0
+    assert body["meta"]["search_center"] == {"lat": 43.6322, "lon": -116.2052}
+    job = body["jobs"][0]
+    assert job["distance_miles"] is not None
+    assert job["within_radius"] is True
+    assert isinstance(job["locations"], list) and job["locations"]
+
+
+def test_within_radius_filter_is_plumbed_through(api):
+    client, _ = api
+    body = client.get(
+        "/v1/search",
+        params={
+            "query": SAMPLE_QUERY,
+            "postal_code": SAMPLE_ZIP,
+            "radius": 25,
+            "within_radius": "true",
+        },
+    ).json()
+
+    # every fixture posting is in Boise, so nothing is dropped here, but the
+    # exclusion counters must exist and be wired
+    assert body["meta"]["excluded_out_of_radius"] == 0
+    assert body["meta"]["returned_count"] == len(body["jobs"])
+    assert all(job["within_radius"] is True for job in body["jobs"])
+
+
+def test_post_within_radius_requires_location_geometry(api, upstream_search_state):
+    client, _ = api
+    state = copy.deepcopy(upstream_search_state)
+    state["locations"][0].pop("geometry", None)
+
+    r = client.post("/v1/search", json={"search_state": state, "within_radius": True})
+
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "invalid_search_state"

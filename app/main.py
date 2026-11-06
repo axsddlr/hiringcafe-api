@@ -65,6 +65,10 @@ class RawSearchRequest(BaseModel):
     include_sponsored: bool = Field(
         False, description="Include sponsored/promoted placements (excluded by default)"
     )
+    within_radius: bool = Field(
+        False,
+        description="Only return postings with a listed workplace inside the searchState radius",
+    )
 
 
 def create_app() -> FastAPI:
@@ -157,6 +161,10 @@ def create_app() -> FastAPI:
             False,
             description="Include sponsored/promoted placements. Excluded by default; see README.",
         ),
+        within_radius: bool = Query(
+            False,
+            description="Only return postings with at least one listed workplace inside `radius`",
+        ),
         api_client: HiringCafeClient = Depends(get_client),
     ) -> dict:
         found = resolve_us_zip(
@@ -182,6 +190,10 @@ def create_app() -> FastAPI:
             raw_payload=result.raw_payload,
             cache_hit=result.cache_hit,
             include_sponsored=include_sponsored,
+            center={"lat": found.lat, "lon": found.lon},
+            radius=radius,
+            radius_unit=radius_unit,
+            within_radius_only=within_radius,
         )
 
     @app.post(
@@ -211,10 +223,27 @@ def create_app() -> FastAPI:
         result = await api_client.fetch(search_state, page=body.page)
         guard_upstream_error(result)
         locations = search_state.get("locations") or []
+        first_location = locations[0] if locations and isinstance(locations[0], dict) else {}
+
+        center = None
+        radius = None
+        radius_unit = None
+        if body.within_radius:
+            geometry = (first_location.get("geometry") or {}).get("location") or {}
+            if geometry.get("lat") is None or geometry.get("lon") is None:
+                raise InvalidSearchStateError(
+                    "within_radius requires locations[0].geometry.location with lat and lon",
+                    details={"location": first_location.get("id")},
+                )
+            center = {"lat": geometry["lat"], "lon": geometry["lon"]}
+            options = first_location.get("options") or {}
+            radius = options.get("radius")
+            radius_unit = options.get("radius_unit") or "miles"
+
         return normalize_page(
             result.page_props,
             query=str(search_state.get("searchQuery", "")),
-            location=locations[0] if locations and isinstance(locations[0], dict) else {},
+            location=first_location,
             build_id=result.build_id,
             upstream_status=result.upstream_status,
             fetched_at=result.fetched_at,
@@ -222,6 +251,10 @@ def create_app() -> FastAPI:
             raw_payload=result.raw_payload,
             cache_hit=result.cache_hit,
             include_sponsored=body.include_sponsored,
+            center=center,
+            radius=radius,
+            radius_unit=radius_unit,
+            within_radius_only=body.within_radius,
         )
 
     return app
