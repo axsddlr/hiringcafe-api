@@ -76,6 +76,7 @@ class Job(TypedDict):
     location: JobLocation
     workplace_type: str | None
     seniority: str | None
+    job_category: str | None
     employment_types: list[str]
     years_experience: int | None
     salary: Salary

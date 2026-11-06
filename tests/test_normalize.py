@@ -83,6 +83,7 @@ def test_first_job_exact_extraction(page_props, upstream_search_state):
     assert job["company_industry"] == "Information Technology"
     assert job["workplace_type"] == "Onsite"
     assert job["seniority"] == "Entry Level"
+    assert job["job_category"] == "Data and Analytics"
     assert job["employment_types"] == ["Full Time"]
     assert job["years_experience"] is None
     assert job["location"]["formatted"] == "Boise, Idaho, United States"
@@ -213,6 +214,17 @@ def test_upstream_error_surfaces(page_props, upstream_search_state):
     page_props = dict(page_props, ssrError="upstream timeout")
     out = build(page_props, upstream_search_state)
     assert out["meta"]["upstream_error"] == "upstream timeout"
+
+
+def test_every_job_carries_a_category(page_props, upstream_search_state):
+    """job_category is upstream's own classification and is always populated here.
+
+    Without it, keyword search returns business/sales noise: a "network specialist"
+    query matches provider-network and media-relations roles.
+    """
+    jobs = build(page_props, upstream_search_state)["jobs"]
+    assert all(job["job_category"] for job in jobs)
+    assert {j["job_category"] for j in jobs} >= {"Data and Analytics", "Finance and Accounting"}
 
 
 def test_no_html_entities_survive_anywhere(page_props, upstream_search_state):

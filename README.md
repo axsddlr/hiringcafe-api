@@ -219,6 +219,7 @@ curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&rad
       },
       "workplace_type": "Onsite",
       "seniority": "Entry Level",
+      "job_category": "Data and Analytics",
       "employment_types": ["Full Time"],
       "years_experience": null,
       "salary": {

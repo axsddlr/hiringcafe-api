@@ -164,6 +164,7 @@ def normalize_job(hit: dict) -> dict:
         },
         "workplace_type": data.get("workplace_type"),
         "seniority": data.get("seniority_level"),
+        "job_category": data.get("job_category"),
         "employment_types": _list(data.get("commitment")),
         "years_experience": _int(data.get("min_industry_and_role_yoe")),
         "salary": normalize_salary(data),
