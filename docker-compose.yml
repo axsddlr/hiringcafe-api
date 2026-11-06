@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hiringcafe-api:local
+    ports:
+      - "8070:8070"
+    environment:
+      HC_LOG_LEVEL: info
+      HC_CACHE_TTL: "300"
+      HC_CACHE_MAX: "256"
+      HC_MAX_CONCURRENCY: "4"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8070/health', timeout=4).status == 200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

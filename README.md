@@ -50,6 +50,47 @@ Scrapling imports them when its fetcher module loads, even for HTTP-only use.
 
 ---
 
+## Docker
+
+```bash
+docker build -t hiringcafe-api .
+docker run -d --name hiringcafe-api -p 8070:8070 hiringcafe-api
+curl "http://127.0.0.1:8070/v1/search?query=data%20analyst&postal_code=83702&radius=25"
+```
+
+Or with Compose (builds and runs the same image):
+
+```bash
+docker compose up -d --build
+docker compose logs -f api
+docker compose down
+```
+
+What the image does:
+
+- installs from `uv.lock` with `uv sync --frozen --no-dev` — no pip, no dev tooling;
+- ships `data/us_zips.db`, so start-up needs no download; the 2.6 MB GeoNames dump is excluded;
+- runs as **UID 10001** (`appuser`), never root;
+- exposes `8070` with a `HEALTHCHECK` on `/health` (also mirrored into `docker-compose.yml`);
+- is **789 MB**, of which **280 MB is `playwright` + `patchright`**. Scrapling imports
+  both when its fetcher module loads, even though this service only uses the HTTP
+  fetcher, so they cannot be dropped without patching the library.
+
+`tests/` and `verification/` are excluded via `.dockerignore`; run the suite on the
+host with `uv run pytest`. Environment variables are the same `HC_*` surface as the
+host app:
+
+```bash
+docker run -d -p 8070:8070 -e HC_CACHE_TTL=60 -e HC_MAX_CONCURRENCY=2 hiringcafe-api
+```
+
+Every layer choice here is deliberate: dependencies are installed **as** the
+non-root user with a BuildKit cache mount for uv's wheel cache. The obvious
+alternatives — a trailing `chown -R /app` and a plain `uv sync` — cost 411 MB and
+~400 MB of dead weight respectively (1.86 GB versus 789 MB, measured).
+
+---
+
 ## Endpoints
 
 | Method | Path | Purpose |
@@ -334,4 +375,7 @@ scripts/
   verify_live.py       live output vs ground truth
 tests/            60 offline tests + captured upstream fixture
 verification/     captured live responses used as evidence
+Dockerfile        uv-based, non-root, healthchecked image
+docker-compose.yml
+.dockerignore
 ```

@@ -1,0 +1,21 @@
+# Keep the build context to what the runtime image actually needs.
+
+# VCS / local env
+.git/
+.gitignore
+.venv/
+.env
+
+# Python noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Not needed to serve traffic
+tests/
+verification/
+scripts/
+*.md
+
+# 2.6 MB raw GeoNames dump; the built DB is copied instead
+data/geonames/
