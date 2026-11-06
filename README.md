@@ -72,9 +72,11 @@ What the image does:
 - ships `data/us_zips.db`, so start-up needs no download; the 2.6 MB GeoNames dump is excluded;
 - runs as **UID 10001** (`appuser`), never root;
 - exposes `8070` with a `HEALTHCHECK` on `/health` (also mirrored into `docker-compose.yml`);
-- is **789 MB**, of which **280 MB is `playwright` + `patchright`**. Scrapling imports
-  both when its fetcher module loads, even though this service only uses the HTTP
-  fetcher, so they cannot be dropped without patching the library.
+- is **592 MB**. `playwright` — 140 MB of browser automation this service never
+  touches — is excluded with `uv sync --no-install-package playwright`; only its
+  sibling `patchright` is genuinely imported by Scrapling's HTTP path. A
+  build-time import check and the CI container smoke test fail loudly if that
+  ever stops being true.
 
 `tests/` and `verification/` are excluded via `.dockerignore`; run the suite on the
 host with `uv run pytest`. Environment variables are the same `HC_*` surface as the
@@ -87,7 +89,8 @@ docker run -d -p 8070:8070 -e HC_CACHE_TTL=60 -e HC_MAX_CONCURRENCY=2 hiringcafe
 Every layer choice here is deliberate: dependencies are installed **as** the
 non-root user with a BuildKit cache mount for uv's wheel cache. The obvious
 alternatives — a trailing `chown -R /app` and a plain `uv sync` — cost 411 MB and
-~400 MB of dead weight respectively (1.86 GB versus 789 MB, measured).
+~400 MB of dead weight respectively. Measured progression:
+**1.86 GB → 789 MB → 592 MB**.
 
 ---
 
@@ -273,11 +276,17 @@ returned as `200` with `meta.upstream_error` populated.
 
 ## Verification
 
-72 offline tests, no network:
+81 offline tests, no network, **96% statement coverage** (excluding the
+TypedDict-only `models.py`):
 
 ```bash
-uv run pytest        # 72 passed
+uv run pytest --cov=app --cov-report=term-missing   # 81 passed, 96%
+uv run ruff check app scripts tests                 # clean
 ```
+
+CI runs exactly that on every push and PR — lint, the suite with coverage, plus a
+container build and health smoke test — in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 The suite is not smoke tests. Notable coverage:
 
@@ -332,6 +341,10 @@ caller supply it verbatim.
 
 **Caching.** Two layers: `buildId` (TTL 6 h, invalidated on 404) and whole
 responses (TTL 300 s, LRU 256). A repeated search goes from ~1.5 s to ~6 ms.
+
+**Responses are gzipped.** A 38-job search is ~80 KB of JSON and compresses to
+~15 KB (82–85% measured); `GZipMiddleware` applies above a 2 KB threshold, so
+`/health` does not get gzip framing for nothing.
 
 **Privacy.** Upstream ships `viewedByUsers` / `appliedFromUsers` /
 `savedFromUsers` / `hiddenFromUsers` — arrays of real Firebase UIDs. They are
@@ -402,9 +415,10 @@ scripts/
   probe_pagination.py  prove how `page` is passed
   probe_sponsored.py   scan upstream HTML+JSON for placement markers
   verify_live.py       live output vs ground truth
-tests/            72 offline tests + captured upstream fixture
+tests/            81 offline tests + captured upstream fixture
 verification/     captured live responses used as evidence
 Dockerfile        uv-based, non-root, healthchecked image
 docker-compose.yml
 .dockerignore
+.github/workflows/ci.yml   lint + tests + container smoke test
 ```

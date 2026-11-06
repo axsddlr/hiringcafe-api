@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      # --frozen fails if pyproject.toml and uv.lock have drifted apart,
+      # so a lockfile that was not regenerated is caught here, not in prod.
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check app scripts tests
+
+      - name: Tests
+        run: uv run pytest --cov=app --cov-report=term-missing
+
+  docker:
+    name: image builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t hiringcafe-api:ci .
+
+      # Start the container and require a real /health response. This catches a
+      # broken image that still builds (bad command, missing DB, crash-looping).
+      - name: Smoke test container
+        run: |
+          docker run -d --name ci -p 8070:8070 hiringcafe-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8070/health > /dev/null; then
+              echo "healthy after ${i}s"
+              curl -fsS http://127.0.0.1:8070/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "container never became healthy"
+          docker logs ci
+          exit 1
+
+      - name: Container runs unprivileged
+        run: test "$(docker exec ci id -u)" = "10001"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ci || true

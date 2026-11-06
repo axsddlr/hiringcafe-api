@@ -79,3 +79,11 @@ def test_injection_attempt_is_just_an_unknown_zip():
         resolve_us_zip("'; DROP TABLE zips;--")
     # and the database is still intact
     assert resolve_us_zip(SAMPLE_ZIP).postal_code == SAMPLE_ZIP
+
+
+def test_missing_zip_database_is_a_server_error_not_a_404(tmp_path):
+    """A missing DB is our fault (500), not the caller's (404) — the codes must not blur."""
+    from app.errors import ZipDatabaseMissingError
+
+    with pytest.raises(ZipDatabaseMissingError):
+        resolve_us_zip(SAMPLE_ZIP, zipdb_path=tmp_path / "does-not-exist.db")

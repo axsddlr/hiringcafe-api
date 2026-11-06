@@ -12,6 +12,7 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -59,7 +60,7 @@ class RawSearchRequest(BaseModel):
         description="Verbatim searchState object, e.g. {'locations': [...], 'searchQuery': 'nurse'}",
         examples=[{"locations": [], "searchQuery": "nurse"}],
     )
-    page: int = Field(0, ge=0, description="Zero-based page index (unverified upstream key)")
+    page: int = Field(0, ge=0, description="Zero-based page index (a sibling query parameter, verified)")
     include_raw: bool = Field(False, description="Include the untouched upstream payload")
     include_sponsored: bool = Field(
         False, description="Include sponsored/promoted placements (excluded by default)"
@@ -80,6 +81,10 @@ def create_app() -> FastAPI:
             "stale one answers `404` — which this service detects and retries once."
         ),
     )
+
+    # Search payloads are 80-100 KB of JSON that compresses to ~15 KB (82-85%);
+    # the middleware only kicks in above the threshold, so /health stays untouched.
+    app.add_middleware(GZipMiddleware, minimum_size=2048)
 
     # ------------------------------------------------------------- handlers
 
@@ -146,7 +151,7 @@ def create_app() -> FastAPI:
         radius: int = Query(settings.default_radius, ge=1, le=500, description="Search radius in `radius_unit`"),
         radius_unit: Literal["miles", "km"] = settings.default_radius_unit,  # type: ignore[assignment]
         ignore_radius: bool = Query(False, description="Ignore the radius entirely (remote / nationwide search)"),
-        page: int = Query(0, ge=0, description="Zero-based page index (unverified upstream key)"),
+        page: int = Query(0, ge=0, description="Zero-based page index (a sibling query parameter, verified)"),
         include_raw: bool = Query(False, description="Include the untouched upstream payload under `raw`"),
         include_sponsored: bool = Query(
             False,

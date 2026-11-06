@@ -15,7 +15,6 @@ import re
 from scrapling.fetchers import Fetcher
 
 from app.config import Settings
-from app.geo import resolve_us_zip
 from app.hiringcafe import HiringCafeClient
 
 PATTERN = re.compile(r"sponsor|promot|featured|boost|premium", re.I)
@@ -51,7 +50,6 @@ def scan_keys(node, found: set[str]) -> None:
 async def main() -> None:
     settings = Settings(cache_ttl=0.0)
     client = HiringCafeClient(settings)
-    build_id = await client.build_id()
 
     # ---- 1. SSR HTML page ----
     from urllib.parse import quote

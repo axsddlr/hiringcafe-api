@@ -140,6 +140,25 @@ def test_openapi_schema_builds(api):
     assert client.get("/openapi.json").status_code == 200
 
 
+def test_large_responses_are_gzipped(api):
+    """Search payloads are 80-100 KB of JSON; compressing them costs nothing and saves ~82%."""
+    client, _ = api
+    r = client.get("/v1/search", params={"query": SAMPLE_QUERY, "postal_code": SAMPLE_ZIP})
+
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"
+    # httpx decodes transparently, so the body is still the full payload
+    assert len(r.json()["jobs"]) == 38
+
+
+def test_small_responses_are_not_gzipped(api):
+    """Below the 2 KB threshold the header would be pure overhead."""
+    client, _ = api
+    r = client.get("/health")
+
+    assert "content-encoding" not in r.headers
+
+
 def test_upstream_error_with_no_hits_becomes_502(api):
     """A failed upstream search must not masquerade as 'no jobs matched'."""
     client, fake = api

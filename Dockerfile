@@ -25,10 +25,16 @@ RUN chown appuser:appuser /app
 
 # Dependency layer: only rebuilt when the lockfile changes. uv's download cache
 # is mounted, not committed, so wheels do not end up in the image.
+#
+# playwright is a transitive dependency of scrapling[fetchers] and is 140 MB of
+# browser automation this service never touches -- only the HTTP fetcher is used.
+# It is excluded from the install, and the import below fails the build rather
+# than the container if a future Scrapling starts importing it eagerly.
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 USER appuser
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=10001,gid=10001 \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-install-package playwright \
+ && python -c "from scrapling.fetchers import Fetcher; print('scrapling HTTP fetcher importable')"
 
 # Application layer. The GeoNames SQLite DB ships with the image so the service
 # starts without a download step; the raw dump is excluded in .dockerignore.

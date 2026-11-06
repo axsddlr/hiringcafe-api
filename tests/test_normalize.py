@@ -270,6 +270,38 @@ def test_falsey_marker_does_not_exclude(page_props, upstream_search_state):
     assert len(out["jobs"]) == 38
 
 
+def test_pay_falls_back_to_the_period_that_has_numbers():
+    """Upstream sometimes omits listed_compensation_frequency but still sends amounts."""
+    job = normalize_job(
+        {
+            "id": "synthetic",
+            "v5_processed_job_data": {
+                "monthly_min_compensation": 5000,
+                "monthly_max_compensation": 6000,
+            },
+        }
+    )
+    assert job["salary"]["period"] is None
+    assert job["salary"]["min"] == 5000.0
+    assert job["salary"]["max"] == 6000.0
+
+
+def test_non_numeric_compensation_is_treated_as_missing():
+    job = normalize_job(
+        {
+            "id": "synthetic",
+            "v5_processed_job_data": {
+                "listed_compensation_frequency": "Yearly",
+                "yearly_min_compensation": "n/a",
+                "yearly_max_compensation": None,
+                "is_compensation_transparent": True,
+            },
+        }
+    )
+    assert job["salary"]["min"] is None
+    assert job["salary"]["max"] is None
+
+
 def test_html_entities_are_unescaped_in_text_fields():
     """Synthetic: upstream really does double-escape some ATS links and industry strings."""
     job = normalize_job(

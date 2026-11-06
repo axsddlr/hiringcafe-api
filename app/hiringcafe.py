@@ -20,7 +20,7 @@ import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -52,7 +52,7 @@ class SearchResult:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _decode(response: Any) -> str:
