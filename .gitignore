@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+
+# 2.6 MB raw dump; rebuild via scripts/build_zipdb.py
+data/geonames/
+
+# transient
+*.log
+/live_*.json
